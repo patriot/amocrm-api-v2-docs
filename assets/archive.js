@@ -65,10 +65,12 @@
     'telephony/call_event': 'call-event'
   };
 
-  // Подсветка текущего раздела в меню сайта и раскрытые группы на страницах amocrm.com.
+  // Подсветка текущего раздела в меню сайта и сворачивание групп.
   var BASE_CSS = [
     '.amo-archive-nav .amo-archive-current { font-weight: 700 !important; text-decoration: underline !important; text-underline-offset: 3px; }',
-    '.amo-archive-nav .nav__list--embedded { display: block !important; }'
+    '.amo-archive-nav .amo-archive-group { display: block !important; }',
+    '.amo-archive-nav .amo-archive-group.amo-archive-collapsed { display: none !important; }',
+    '.amo-archive-nav .amo-archive-toggle-open .icon-arrow-down::before { transform: rotate(180deg); }'
   ].join('\n');
 
   var DOCS = {};
@@ -119,13 +121,16 @@
         head.setAttribute('href', '#');
         head.appendChild(mk('span', 'icon-arrow-down'));
         sub = mk('ul', 'nav_aside__sub_list custom_list colapse_content');
-        sub.style.display = 'block';
       } else {
         li = mk('li', 'nav__item expander-item text-style--list-heading');
         head = mk('a', 'nav__link nav__link-expander text-bold', g.title);
         sub = mk('ul', 'nav__list nav__list--embedded nav__list--active');
       }
       head.setAttribute('data-archive-toggle', '');
+      sub.classList.add('amo-archive-group');
+      // Раскрыта только группа текущего раздела.
+      var open = g.docs.some(function (d) { return d.slug === currentSlug; });
+      setGroupOpen(head, sub, open);
       g.docs.forEach(function (d) {
         var item = mk('li', ruNav ? 'nav_aside__subitem' : 'nav__item text-style--list-subheading');
         var a = mk('a', ruNav ? 'nav_aside__subitem_link' : 'nav__link', d.name);
@@ -146,11 +151,22 @@
     host.appendChild(list);
   }
 
+  function setGroupOpen(head, sub, open) {
+    sub.classList.toggle('amo-archive-collapsed', !open);
+    head.classList.toggle('amo-archive-toggle-open', open);
+    head.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  /** Клик по заголовку группы: раскрыть её и свернуть остальные (или свернуть, если уже раскрыта). */
   function toggleGroup(head) {
-    var sub = head.parentNode && head.parentNode.querySelector('ul');
-    if (!sub) return;
-    var hidden = sub.style.display === 'none';
-    sub.style.setProperty('display', hidden ? 'block' : 'none', 'important');
+    var nav = head.closest('.amo-archive-nav');
+    if (!nav) return;
+    Array.prototype.forEach.call(nav.querySelectorAll('[data-archive-toggle]'), function (h) {
+      var sub = h.parentNode.querySelector('.amo-archive-group');
+      if (!sub) return;
+      var open = h === head ? sub.classList.contains('amo-archive-collapsed') : false;
+      setGroupOpen(h, sub, open);
+    });
   }
 
   function findAnchor(doc, name) {
