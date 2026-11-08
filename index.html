@@ -325,6 +325,12 @@
     '@keyframes amoViewerFlash { from { background: #fff3b0; } to { background: transparent; } }'
   ].join('\n');
 
+  // Стили, которые нужны и без режима чтения: подсветка текущего раздела в меню сайта.
+  var BASE_CSS = [
+    '.amo-archive-nav .amo-archive-current { font-weight: 700 !important; text-decoration: underline !important; text-underline-offset: 3px; }',
+    '.amo-archive-nav .nav__list--embedded { display: block !important; }'
+  ].join('\n');
+
   var DOCS = {};
   GROUPS.forEach(function (g) { g.docs.forEach(function (d) { DOCS[d.slug] = d; }); });
 
@@ -476,6 +482,90 @@
     readerBtn.setAttribute('aria-pressed', readerMode ? 'true' : 'false');
   }
 
+  function injectBaseCss(doc) {
+    if (doc.getElementById('amo-viewer-base')) return;
+    var style = doc.createElement('style');
+    style.id = 'amo-viewer-base';
+    style.textContent = BASE_CSS;
+    (doc.head || doc.documentElement).appendChild(style);
+  }
+
+  function viewerUrl(slug) {
+    return location.href.split('#')[0] + '#' + slug;
+  }
+
+  // Боковое меню сохранённых страниц — это меню актуальной документации amoCRM (API v4),
+  // которой в архиве нет. Заменяем его пункты разделами архива, сохраняя разметку сайта.
+  function buildSiteNav(doc) {
+    var ruNav = doc.querySelector('nav.nav_aside');
+    var comNav = !ruNav && doc.querySelector('.page-aside nav.nav');
+    var host = ruNav || comNav;
+    if (!host) return;
+    host.classList.add('amo-archive-nav');
+    var mk = function (tag, cls, text) {
+      var n = doc.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    };
+    var list = mk('ul', ruNav ? 'nav_aside__list custom_list' : 'custom_list nav__list');
+    GROUPS.forEach(function (g) {
+      var li, head, sub;
+      if (ruNav) {
+        li = mk('li', 'nav_aside__item colapse_block');
+        head = mk('a', 'nav_aside__item_link colapse_toggler', g.title + ' ');
+        head.setAttribute('href', '#');
+        head.appendChild(mk('span', 'icon-arrow-down'));
+        sub = mk('ul', 'nav_aside__sub_list custom_list colapse_content');
+        sub.style.display = 'block';
+      } else {
+        li = mk('li', 'nav__item expander-item text-style--list-heading');
+        head = mk('a', 'nav__link nav__link-expander text-bold', g.title);
+        sub = mk('ul', 'nav__list nav__list--embedded nav__list--active');
+      }
+      head.setAttribute('data-archive-toggle', '');
+      g.docs.forEach(function (d) {
+        var item = mk('li', ruNav ? 'nav_aside__subitem' : 'nav__item text-style--list-subheading');
+        var a = mk('a', ruNav ? 'nav_aside__subitem_link' : 'nav__link', d.name);
+        a.setAttribute('href', viewerUrl(d.slug));
+        a.setAttribute('data-archive-slug', d.slug);
+        if (d.slug === state.slug) {
+          a.classList.add('amo-archive-current');
+          if (!ruNav) item.classList.add('nav__item--active');
+        }
+        item.appendChild(a);
+        sub.appendChild(item);
+      });
+      li.appendChild(head);
+      li.appendChild(sub);
+      list.appendChild(li);
+    });
+    host.textContent = '';
+    host.appendChild(list);
+  }
+
+  function toggleSiteNavGroup(head) {
+    var sub = head.parentNode && head.parentNode.querySelector('ul');
+    if (!sub) return;
+    if (sub.classList.contains('nav__list--embedded')) {
+      sub.style.setProperty('display', sub.style.display === 'none' ? 'block' : 'none', 'important');
+    } else {
+      sub.style.display = sub.style.display === 'none' ? 'block' : 'none';
+    }
+  }
+
+  function handleFrameSubmit(e) {
+    // Поиск сайта amoCRM недоступен — ищем введённый текст на текущей странице.
+    e.preventDefault();
+    var input = e.target.querySelector('input[type="search"], input[name="s"]');
+    var q = input && input.value.trim();
+    if (!q) return;
+    try {
+      var win = frame.contentWindow;
+      if (!win.find(q, false, false, true)) alert('На этой странице «' + q + '» не найдено.');
+    } catch (err) { /* ignore */ }
+  }
+
   function collectHeadings(doc) {
     var root = doc.querySelector('main') || doc.body;
     var list = [];
@@ -512,10 +602,14 @@
 
   function handleFrameClick(e) {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var toggle = e.target.closest ? e.target.closest('[data-archive-toggle]') : null;
+    if (toggle) { e.preventDefault(); toggleSiteNavGroup(toggle); return; }
     var a = e.target.closest ? e.target.closest('a[href]') : null;
     if (!a) return;
     var raw = a.getAttribute('href') || '';
     var doc = a.ownerDocument;
+    var archiveSlug = a.getAttribute('data-archive-slug');
+    if (archiveSlug) { e.preventDefault(); location.hash = archiveSlug; return; }
 
     if (raw === '#' || /^javascript:/i.test(raw)) { e.preventDefault(); return; }
     if (raw.charAt(0) === '#') {
@@ -571,9 +665,12 @@
     notice.style.display = 'none';
     readerBtn.hidden = false;
     state.loaded = state.slug;
+    injectBaseCss(doc);
+    buildSiteNav(doc);
     applyReader(doc);
     state.headings = collectHeadings(doc);
     doc.addEventListener('click', handleFrameClick, true);
+    doc.addEventListener('submit', handleFrameSubmit, true);
     doc.addEventListener('keydown', function (e) {
       if (e.key === '/' && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) { e.preventDefault(); filter.focus(); }
     });
